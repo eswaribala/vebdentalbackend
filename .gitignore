@@ -1,0 +1,4 @@
+node_modules/
+veb_dental.db
+*.db-journal
+.env
