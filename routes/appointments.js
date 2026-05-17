@@ -35,7 +35,8 @@ router.get('/reminders/tomorrow', (req, res) => {
     const tomorrow = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}-${String(ist.getDate()).padStart(2, '0')}`;
     const appointments = db.prepare(`
       SELECT a.*, p.first_name, p.last_name, p.mobile, p.patient_id as p_id,
-             d.name as doctor_name, s.name as consultant_name
+             d.name as doctor_name, d.mobile as doctor_mobile,
+             s.name as consultant_name, s.mobile as consultant_mobile
       FROM appointments a
       LEFT JOIN patients p ON a.patient_id = p.id
       LEFT JOIN doctors d ON a.doctor_id = d.id
