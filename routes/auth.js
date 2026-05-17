@@ -147,6 +147,29 @@ router.put('/approve/:id', requireAuth, (req, res) => {
   }
 });
 
+// PUT /auth/change-password
+router.put('/change-password', requireAuth, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+    if (!current_password || !new_password)
+      return res.status(400).json({ error: 'Both current and new password are required' });
+    if (new_password.length < 4)
+      return res.status(400).json({ error: 'New password must be at least 4 characters' });
+
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const valid = await bcrypt.compare(current_password, user.password);
+    if (!valid) return res.status(400).json({ error: 'Current password is incorrect' });
+
+    const hash = await bcrypt.hash(new_password, 10);
+    db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hash, req.user.id);
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE /auth/reject/:id
 router.delete('/reject/:id', requireAuth, (req, res) => {
   try {

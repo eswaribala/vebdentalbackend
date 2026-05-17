@@ -81,10 +81,32 @@ router.post('/', (req, res) => {
 
 router.put('/:id', (req, res) => {
   try {
-    const { payment_mode, payment_status, emi_paid, notes } = req.body;
-    db.prepare('UPDATE bills SET payment_mode=?, payment_status=?, emi_paid=?, notes=? WHERE id=?').run(payment_mode, payment_status, emi_paid, notes, req.params.id);
+    const { payment_mode, payment_status, emi_paid, notes, items, subtotal, discount, total_amount, emi_months, emi_amount, bill_date } = req.body;
+    db.prepare(`
+      UPDATE bills SET
+        payment_mode=?, payment_status=?, emi_paid=?, notes=?,
+        items=?, subtotal=?, discount=?, total_amount=?,
+        emi_months=?, emi_amount=?, bill_date=?
+      WHERE id=?
+    `).run(
+      payment_mode, payment_status, emi_paid, notes,
+      typeof items === 'object' ? JSON.stringify(items) : items,
+      subtotal, discount, total_amount,
+      emi_months, emi_amount, bill_date,
+      req.params.id
+    );
     const bill = db.prepare('SELECT * FROM bills WHERE id = ?').get(req.params.id);
+    if (bill && bill.items) bill.items = JSON.parse(bill.items);
     res.json({ success: true, data: bill });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM bills WHERE id = ?').run(req.params.id);
+    res.json({ success: true, message: 'Bill deleted' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

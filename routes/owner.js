@@ -18,6 +18,34 @@ function requireOwner(req, res, next) {
   }
 }
 
+// ── Blocked Slots (owner-as-doctor) ──────────────────────────────────────────
+
+router.get('/blocked-slots', requireOwner, (req, res) => {
+  try {
+    const { date } = req.query;
+    if (!date) return res.json({ success: true, data: [] });
+
+    // Times already taken in owner's own consulting on this date
+    const ownerSlots = db.prepare(`
+      SELECT appointment_time FROM owner_appointments
+      WHERE appointment_date = ? AND appointment_time IS NOT NULL AND appointment_time != ''
+    `).all(date).map(r => r.appointment_time);
+
+    // Times already taken in main clinic appointments for the first doctor (Dr. Vignesh)
+    const clinicSlots = db.prepare(`
+      SELECT a.appointment_time FROM appointments a
+      WHERE a.appointment_date = ?
+        AND a.status != 'cancelled'
+        AND a.doctor_id = (SELECT id FROM doctors ORDER BY id ASC LIMIT 1)
+    `).all(date).map(r => r.appointment_time);
+
+    const blocked = [...new Set([...ownerSlots, ...clinicSlots])];
+    res.json({ success: true, data: blocked });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Consulting Appointments ───────────────────────────────────────────────────
 
 router.get('/appointments', requireOwner, (req, res) => {
