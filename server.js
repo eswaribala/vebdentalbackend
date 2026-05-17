@@ -43,6 +43,7 @@ initializeDatabase().then(() => {
   const diagnosisRouter = require('./routes/diagnosis');
   const billingRouter = require('./routes/billing');
   const consultantsRouter = require('./routes/consultants');
+  const ownerRouter = require('./routes/owner');
 
   app.use('/api/auth', authRouter);                                    // public
   app.use('/api/patients', requireAuth, patientsRouter);
@@ -53,6 +54,7 @@ initializeDatabase().then(() => {
   app.use('/api/diagnosis', requireAuth, diagnosisRouter);
   app.use('/api/billing', requireAuth, billingRouter);
   app.use('/api/consultants', requireAuth, consultantsRouter);
+  app.use('/api/owner', ownerRouter);                                  // owner-only, self-authenticated in route
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`\nVEB Dental API running on http://0.0.0.0:${PORT}/api`);

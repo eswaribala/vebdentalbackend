@@ -1,6 +1,7 @@
 const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
+const bcrypt = require('bcryptjs');
 
 const DB_PATH = path.join(__dirname, 'veb_dental.db');
 
@@ -127,6 +128,19 @@ function createTables(wrapper) {
     is_active INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now')))`);
 
+  wrapper.exec(`CREATE TABLE IF NOT EXISTS owner_appointments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    clinic_name TEXT NOT NULL,
+    clinic_address TEXT,
+    appointment_date TEXT NOT NULL,
+    appointment_time TEXT,
+    patient_name TEXT,
+    procedure TEXT,
+    income REAL DEFAULT 0,
+    payment_mode TEXT DEFAULT 'cash',
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')))`);
+
   // Migrations for existing databases
   try { wrapper.exec('ALTER TABLE appointments ADD COLUMN consultant_id INTEGER'); } catch (e) {}
   try { wrapper.exec("ALTER TABLE appointments ADD COLUMN clinic_branch TEXT DEFAULT 'Avadi'"); } catch (e) {}
@@ -144,6 +158,14 @@ async function initializeDatabase() {
 
   _wrapper = createWrapper(_db);
   createTables(_wrapper);
+
+  // Seed default owner account (admin / admin)
+  const existingOwner = _wrapper.prepare("SELECT id FROM users WHERE email = 'admin'").get();
+  if (!existingOwner) {
+    const hash = await bcrypt.hash('admin', 10);
+    _wrapper.prepare("INSERT INTO users (name, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)").run('Admin', 'admin', hash, 'owner', 1);
+    console.log('Default owner created  →  email: admin  password: admin');
+  }
 
   // Seed Dr. Vignesh
   const existing = _wrapper.prepare('SELECT id FROM doctors WHERE name = ?').get('Dr. Vignesh');
