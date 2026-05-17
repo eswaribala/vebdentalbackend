@@ -8,10 +8,11 @@ router.get('/', (req, res) => {
     const { date, doctor_id, patient_id, status } = req.query;
     let query = `
       SELECT a.*, p.first_name, p.last_name, p.mobile, p.patient_id as p_id,
-             d.name as doctor_name
+             d.name as doctor_name, s.name as consultant_name
       FROM appointments a
       LEFT JOIN patients p ON a.patient_id = p.id
       LEFT JOIN doctors d ON a.doctor_id = d.id
+      LEFT JOIN staff s ON a.consultant_id = s.id
       WHERE 1=1
     `;
     const params = [];
@@ -27,15 +28,37 @@ router.get('/', (req, res) => {
   }
 });
 
+router.get('/reminders/tomorrow', (req, res) => {
+  try {
+    const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    ist.setDate(ist.getDate() + 1);
+    const tomorrow = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}-${String(ist.getDate()).padStart(2, '0')}`;
+    const appointments = db.prepare(`
+      SELECT a.*, p.first_name, p.last_name, p.mobile, p.patient_id as p_id,
+             d.name as doctor_name, s.name as consultant_name
+      FROM appointments a
+      LEFT JOIN patients p ON a.patient_id = p.id
+      LEFT JOIN doctors d ON a.doctor_id = d.id
+      LEFT JOIN staff s ON a.consultant_id = s.id
+      WHERE a.appointment_date = ? AND a.status != 'cancelled' AND p.mobile IS NOT NULL
+      ORDER BY a.appointment_time ASC
+    `).all(tomorrow);
+    res.json({ success: true, data: appointments, date: tomorrow });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/today', (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const appointments = db.prepare(`
       SELECT a.*, p.first_name, p.last_name, p.mobile, p.patient_id as p_id,
-             d.name as doctor_name
+             d.name as doctor_name, s.name as consultant_name
       FROM appointments a
       LEFT JOIN patients p ON a.patient_id = p.id
       LEFT JOIN doctors d ON a.doctor_id = d.id
+      LEFT JOIN staff s ON a.consultant_id = s.id
       WHERE a.appointment_date = ?
       ORDER BY a.appointment_time ASC
     `).all(today);
@@ -48,10 +71,11 @@ router.get('/today', (req, res) => {
 router.get('/:id', (req, res) => {
   try {
     const appt = db.prepare(`
-      SELECT a.*, p.first_name, p.last_name, p.mobile, d.name as doctor_name
+      SELECT a.*, p.first_name, p.last_name, p.mobile, d.name as doctor_name, s.name as consultant_name
       FROM appointments a
       LEFT JOIN patients p ON a.patient_id = p.id
       LEFT JOIN doctors d ON a.doctor_id = d.id
+      LEFT JOIN staff s ON a.consultant_id = s.id
       WHERE a.id = ?
     `).get(req.params.id);
     if (!appt) return res.status(404).json({ error: 'Appointment not found' });
@@ -63,11 +87,11 @@ router.get('/:id', (req, res) => {
 
 router.post('/', (req, res) => {
   try {
-    const { patient_id, doctor_id, appointment_date, appointment_time, purpose, notes } = req.body;
+    const { patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, consultant_id, clinic_branch } = req.body;
     const result = db.prepare(`
-      INSERT INTO appointments (patient_id, doctor_id, appointment_date, appointment_time, purpose, notes)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(patient_id, doctor_id, appointment_date, appointment_time, purpose, notes);
+      INSERT INTO appointments (patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, consultant_id, clinic_branch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, consultant_id, clinic_branch || 'Avadi');
     const appt = db.prepare('SELECT * FROM appointments WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ success: true, data: appt });
   } catch (err) {
@@ -77,11 +101,11 @@ router.post('/', (req, res) => {
 
 router.put('/:id', (req, res) => {
   try {
-    const { patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, status } = req.body;
+    const { patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, status, consultant_id, clinic_branch } = req.body;
     db.prepare(`
-      UPDATE appointments SET patient_id=?, doctor_id=?, appointment_date=?, appointment_time=?, purpose=?, notes=?, status=?
+      UPDATE appointments SET patient_id=?, doctor_id=?, appointment_date=?, appointment_time=?, purpose=?, notes=?, status=?, consultant_id=?, clinic_branch=?
       WHERE id=?
-    `).run(patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, status, req.params.id);
+    `).run(patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, status, consultant_id, clinic_branch, req.params.id);
     const appt = db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
     res.json({ success: true, data: appt });
   } catch (err) {

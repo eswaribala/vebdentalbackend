@@ -16,14 +16,16 @@ function createWrapper(sqlDb) {
   const wrap = {
     prepare: (sql) => ({
       run: (...args) => {
-        const params = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+        const raw = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+        const params = Array.from(raw).map(v => v === undefined ? null : v);
         sqlDb.run(sql, params);
         const res = sqlDb.exec('SELECT last_insert_rowid() as id');
         saveDb();
         return { lastInsertRowid: res[0]?.values[0][0] ?? 0, changes: 1 };
       },
       get: (...args) => {
-        const params = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+        const raw = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+        const params = Array.from(raw).map(v => v === undefined ? null : v);
         const stmt = sqlDb.prepare(sql);
         if (params.length) stmt.bind(params);
         let row = null;
@@ -32,7 +34,8 @@ function createWrapper(sqlDb) {
         return row;
       },
       all: (...args) => {
-        const params = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+        const raw = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+        const params = Array.from(raw).map(v => v === undefined ? null : v);
         const stmt = sqlDb.prepare(sql);
         if (params.length) stmt.bind(params);
         const rows = [];
@@ -104,6 +107,30 @@ function createTables(wrapper) {
     payment_status TEXT DEFAULT 'pending', emi_months INTEGER, emi_amount REAL,
     emi_paid INTEGER DEFAULT 0, bill_date TEXT NOT NULL, notes TEXT,
     created_at TEXT DEFAULT (datetime('now')))`);
+
+  wrapper.exec(`CREATE TABLE IF NOT EXISTS consultant_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    consultant_id INTEGER NOT NULL,
+    appointment_id INTEGER,
+    amount REAL NOT NULL,
+    payment_date TEXT NOT NULL,
+    payment_mode TEXT DEFAULT 'cash',
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')))`);
+
+  wrapper.exec(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')))`);
+
+  // Migrations for existing databases
+  try { wrapper.exec('ALTER TABLE appointments ADD COLUMN consultant_id INTEGER'); } catch (e) {}
+  try { wrapper.exec("ALTER TABLE appointments ADD COLUMN clinic_branch TEXT DEFAULT 'Avadi'"); } catch (e) {}
+  try { wrapper.exec("ALTER TABLE patients ADD COLUMN clinic_branch TEXT DEFAULT 'Avadi'"); } catch (e) {}
 }
 
 async function initializeDatabase() {

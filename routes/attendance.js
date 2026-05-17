@@ -3,6 +3,13 @@ const router = express.Router();
 const { getDb } = require('../database');
 const db = getDb();
 
+function getIST() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const date = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}-${String(ist.getDate()).padStart(2, '0')}`;
+  const time = `${String(ist.getHours()).padStart(2, '0')}:${String(ist.getMinutes()).padStart(2, '0')}`;
+  return { date, time };
+}
+
 router.get('/', (req, res) => {
   try {
     const { date, staff_id } = req.query;
@@ -25,7 +32,7 @@ router.get('/', (req, res) => {
 
 router.get('/today', (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getIST().date;
     const allStaff = db.prepare('SELECT * FROM staff WHERE is_active = 1').all();
     const records = db.prepare(`
       SELECT a.*, s.name as staff_name, s.role, s.department
@@ -42,8 +49,10 @@ router.get('/today', (req, res) => {
 router.get('/summary', (req, res) => {
   try {
     const { month, year } = req.query;
-    const monthStr = month ? String(month).padStart(2, '0') : String(new Date().getMonth() + 1).padStart(2, '0');
-    const yearStr = year || new Date().getFullYear().toString();
+    const istNow = getIST();
+    const [istYear, istMonth] = istNow.date.split('-');
+    const monthStr = month ? String(month).padStart(2, '0') : istMonth;
+    const yearStr = year || istYear;
     const records = db.prepare(`
       SELECT s.id, s.name, s.role, s.department,
              COUNT(CASE WHEN a.status = 'present' THEN 1 END) as present_days,
@@ -63,8 +72,7 @@ router.get('/summary', (req, res) => {
 router.post('/checkin', (req, res) => {
   try {
     const { staff_id } = req.body;
-    const today = new Date().toISOString().split('T')[0];
-    const now = new Date().toTimeString().slice(0, 5);
+    const { date: today, time: now } = getIST();
     const existing = db.prepare('SELECT * FROM attendance WHERE staff_id = ? AND date = ?').get(staff_id, today);
     if (existing) {
       db.prepare('UPDATE attendance SET check_in = ?, status = ? WHERE id = ?').run(now, 'present', existing.id);
@@ -80,8 +88,7 @@ router.post('/checkin', (req, res) => {
 router.post('/checkout', (req, res) => {
   try {
     const { staff_id } = req.body;
-    const today = new Date().toISOString().split('T')[0];
-    const now = new Date().toTimeString().slice(0, 5);
+    const { date: today, time: now } = getIST();
     const existing = db.prepare('SELECT * FROM attendance WHERE staff_id = ? AND date = ?').get(staff_id, today);
     if (!existing) return res.status(404).json({ error: 'No check-in found for today' });
     db.prepare('UPDATE attendance SET check_out = ? WHERE id = ?').run(now, existing.id);

@@ -55,14 +55,14 @@ router.post('/', (req, res) => {
   try {
     const {
       first_name, last_name, mobile, dob, gender, address,
-      blood_group, medical_history, allergies, emergency_contact
+      blood_group, medical_history, allergies, emergency_contact, clinic_branch
     } = req.body;
     const patient_id = generatePatientId();
     const age = calcAge(dob);
     const result = db.prepare(`
-      INSERT INTO patients (patient_id, first_name, last_name, mobile, dob, age, gender, address, blood_group, medical_history, allergies, emergency_contact)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(patient_id, first_name, last_name, mobile, dob, age, gender, address, blood_group, medical_history, allergies, emergency_contact);
+      INSERT INTO patients (patient_id, first_name, last_name, mobile, dob, age, gender, address, blood_group, medical_history, allergies, emergency_contact, clinic_branch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(patient_id, first_name, last_name, mobile, dob, age, gender, address, blood_group, medical_history, allergies, emergency_contact, clinic_branch || 'Avadi');
     const patient = db.prepare('SELECT * FROM patients WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ success: true, data: patient });
   } catch (err) {
@@ -75,14 +75,15 @@ router.put('/:id', (req, res) => {
   try {
     const {
       first_name, last_name, mobile, dob, gender, address,
-      blood_group, medical_history, allergies, emergency_contact
+      blood_group, medical_history, allergies, emergency_contact, clinic_branch
     } = req.body;
     const age = calcAge(dob);
     db.prepare(`
       UPDATE patients SET first_name=?, last_name=?, mobile=?, dob=?, age=?, gender=?,
-      address=?, blood_group=?, medical_history=?, allergies=?, emergency_contact=?, updated_at=CURRENT_TIMESTAMP
+      address=?, blood_group=?, medical_history=?, allergies=?, emergency_contact=?,
+      clinic_branch=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?
-    `).run(first_name, last_name, mobile, dob, age, gender, address, blood_group, medical_history, allergies, emergency_contact, req.params.id);
+    `).run(first_name, last_name, mobile, dob, age, gender, address, blood_group, medical_history, allergies, emergency_contact, clinic_branch || 'Avadi', req.params.id);
     const patient = db.prepare('SELECT * FROM patients WHERE id = ?').get(req.params.id);
     res.json({ success: true, data: patient });
   } catch (err) {

@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const jwt = require('jsonwebtoken');
 const { initializeDatabase } = require('./database');
 
 const app = express();
@@ -11,7 +12,7 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', clinic: 'VEB Dental Care & Implant Centre', timestamp: new Date() });
+  res.json({ status: 'ok', clinic: 'VEB DENTAL CARE', timestamp: new Date() });
 });
 
 app.use((err, req, res, next) => {
@@ -19,8 +20,21 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error', message: err.message });
 });
 
+function requireAuth(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  try {
+    const { JWT_SECRET } = require('./routes/auth');
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
 // Initialize DB first, then start server
 initializeDatabase().then(() => {
+  const { router: authRouter } = require('./routes/auth');
   const patientsRouter = require('./routes/patients');
   const doctorsRouter = require('./routes/doctors');
   const staffRouter = require('./routes/staff');
@@ -28,14 +42,17 @@ initializeDatabase().then(() => {
   const attendanceRouter = require('./routes/attendance');
   const diagnosisRouter = require('./routes/diagnosis');
   const billingRouter = require('./routes/billing');
+  const consultantsRouter = require('./routes/consultants');
 
-  app.use('/api/patients', patientsRouter);
-  app.use('/api/doctors', doctorsRouter);
-  app.use('/api/staff', staffRouter);
-  app.use('/api/appointments', appointmentsRouter);
-  app.use('/api/attendance', attendanceRouter);
-  app.use('/api/diagnosis', diagnosisRouter);
-  app.use('/api/billing', billingRouter);
+  app.use('/api/auth', authRouter);                                    // public
+  app.use('/api/patients', requireAuth, patientsRouter);
+  app.use('/api/doctors', requireAuth, doctorsRouter);
+  app.use('/api/staff', requireAuth, staffRouter);
+  app.use('/api/appointments', requireAuth, appointmentsRouter);
+  app.use('/api/attendance', requireAuth, attendanceRouter);
+  app.use('/api/diagnosis', requireAuth, diagnosisRouter);
+  app.use('/api/billing', requireAuth, billingRouter);
+  app.use('/api/consultants', requireAuth, consultantsRouter);
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`\nVEB Dental API running on http://0.0.0.0:${PORT}/api`);
