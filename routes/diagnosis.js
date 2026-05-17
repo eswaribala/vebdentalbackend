@@ -9,10 +9,11 @@ router.get('/', (req, res) => {
     const { patient_id } = req.query;
     let query = `
       SELECT dg.*, p.first_name, p.last_name, p.patient_id as p_id,
-             dc.name as doctor_name
+             dc.name as doctor_name, s.name as consultant_name
       FROM diagnosis dg
       LEFT JOIN patients p ON dg.patient_id = p.id
       LEFT JOIN doctors dc ON dg.doctor_id = dc.id
+      LEFT JOIN staff s ON dg.consultant_id = s.id
       WHERE 1=1
     `;
     const params = [];
@@ -29,10 +30,11 @@ router.get('/:id', (req, res) => {
   try {
     const diag = db.prepare(`
       SELECT dg.*, p.first_name, p.last_name, p.patient_id as p_id,
-             dc.name as doctor_name
+             dc.name as doctor_name, s.name as consultant_name
       FROM diagnosis dg
       LEFT JOIN patients p ON dg.patient_id = p.id
       LEFT JOIN doctors dc ON dg.doctor_id = dc.id
+      LEFT JOIN staff s ON dg.consultant_id = s.id
       WHERE dg.id = ?
     `).get(req.params.id);
     if (!diag) return res.status(404).json({ error: 'Diagnosis not found' });
@@ -46,11 +48,11 @@ router.get('/:id', (req, res) => {
 
 router.post('/', (req, res) => {
   try {
-    const { patient_id, doctor_id, appointment_id, visit_date, chief_complaint, clinical_notes, tooth_chart } = req.body;
+    const { patient_id, doctor_id, consultant_id, appointment_id, visit_date, chief_complaint, clinical_notes, tooth_chart } = req.body;
     const result = db.prepare(`
-      INSERT INTO diagnosis (patient_id, doctor_id, appointment_id, visit_date, chief_complaint, clinical_notes, tooth_chart)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(patient_id, doctor_id, appointment_id, visit_date, chief_complaint, clinical_notes,
+      INSERT INTO diagnosis (patient_id, doctor_id, consultant_id, appointment_id, visit_date, chief_complaint, clinical_notes, tooth_chart)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(patient_id, doctor_id, consultant_id, appointment_id, visit_date, chief_complaint, clinical_notes,
       typeof tooth_chart === 'object' ? JSON.stringify(tooth_chart) : tooth_chart);
     const diag = db.prepare('SELECT * FROM diagnosis WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ success: true, data: diag });

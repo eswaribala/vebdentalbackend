@@ -145,6 +145,7 @@ function createTables(wrapper) {
   try { wrapper.exec('ALTER TABLE appointments ADD COLUMN consultant_id INTEGER'); } catch (e) {}
   try { wrapper.exec("ALTER TABLE appointments ADD COLUMN clinic_branch TEXT DEFAULT 'Avadi'"); } catch (e) {}
   try { wrapper.exec("ALTER TABLE patients ADD COLUMN clinic_branch TEXT DEFAULT 'Avadi'"); } catch (e) {}
+  try { wrapper.exec('ALTER TABLE diagnosis ADD COLUMN consultant_id INTEGER'); } catch (e) {}
 }
 
 async function initializeDatabase() {
