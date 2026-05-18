@@ -3,12 +3,13 @@ const router = express.Router();
 const { getDb } = require('../database');
 const db = getDb();
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    const { date, doctor_id, patient_id, status } = req.query;
+    const { date, doctor_id, patient_id, status, consultant_id } = req.query;
     let query = `
       SELECT a.*, p.first_name, p.last_name, p.mobile, p.patient_id as p_id,
-             d.name as doctor_name, s.name as consultant_name
+             d.name as doctor_name, d.mobile as doctor_mobile,
+             s.name as consultant_name, s.mobile as consultant_mobile
       FROM appointments a
       LEFT JOIN patients p ON a.patient_id = p.id
       LEFT JOIN doctors d ON a.doctor_id = d.id
@@ -16,24 +17,23 @@ router.get('/', (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    if (date) { query += ' AND a.appointment_date = ?'; params.push(date); }
-    if (doctor_id) { query += ' AND a.doctor_id = ?'; params.push(doctor_id); }
-    if (patient_id) { query += ' AND a.patient_id = ?'; params.push(patient_id); }
-    if (status) { query += ' AND a.status = ?'; params.push(status); }
+    if (date)          { query += ' AND a.appointment_date = ?';  params.push(date); }
+    if (doctor_id)     { query += ' AND a.doctor_id = ?';         params.push(doctor_id); }
+    if (patient_id)    { query += ' AND a.patient_id = ?';        params.push(patient_id); }
+    if (status)        { query += ' AND a.status = ?';            params.push(status); }
+    if (consultant_id) { query += ' AND a.consultant_id = ?';     params.push(consultant_id); }
     query += ' ORDER BY a.appointment_date DESC, a.appointment_time ASC';
-    const appointments = db.prepare(query).all(...params);
+    const appointments = await db.prepare(query).all(...params);
     res.json({ success: true, data: appointments });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.get('/reminders/tomorrow', (req, res) => {
+router.get('/reminders/tomorrow', async (req, res) => {
   try {
     const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
     ist.setDate(ist.getDate() + 1);
     const tomorrow = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}-${String(ist.getDate()).padStart(2, '0')}`;
-    const appointments = db.prepare(`
+    const appointments = await db.prepare(`
       SELECT a.*, p.first_name, p.last_name, p.mobile, p.patient_id as p_id,
              d.name as doctor_name, d.mobile as doctor_mobile,
              s.name as consultant_name, s.mobile as consultant_mobile
@@ -45,17 +45,17 @@ router.get('/reminders/tomorrow', (req, res) => {
       ORDER BY a.appointment_time ASC
     `).all(tomorrow);
     res.json({ success: true, data: appointments, date: tomorrow });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.get('/today', (req, res) => {
+router.get('/today', async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const appointments = db.prepare(`
+    const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const today = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}-${String(ist.getDate()).padStart(2, '0')}`;
+    const appointments = await db.prepare(`
       SELECT a.*, p.first_name, p.last_name, p.mobile, p.patient_id as p_id,
-             d.name as doctor_name, s.name as consultant_name
+             d.name as doctor_name, d.mobile as doctor_mobile,
+             s.name as consultant_name, s.mobile as consultant_mobile
       FROM appointments a
       LEFT JOIN patients p ON a.patient_id = p.id
       LEFT JOIN doctors d ON a.doctor_id = d.id
@@ -64,14 +64,12 @@ router.get('/today', (req, res) => {
       ORDER BY a.appointment_time ASC
     `).all(today);
     res.json({ success: true, data: appointments });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const appt = db.prepare(`
+    const appt = await db.prepare(`
       SELECT a.*, p.first_name, p.last_name, p.mobile, d.name as doctor_name, s.name as consultant_name
       FROM appointments a
       LEFT JOIN patients p ON a.patient_id = p.id
@@ -81,46 +79,39 @@ router.get('/:id', (req, res) => {
     `).get(req.params.id);
     if (!appt) return res.status(404).json({ error: 'Appointment not found' });
     res.json({ success: true, data: appt });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, consultant_id, clinic_branch } = req.body;
-    const result = db.prepare(`
+    const result = await db.prepare(`
       INSERT INTO appointments (patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, consultant_id, clinic_branch)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, consultant_id, clinic_branch || 'Avadi');
-    const appt = db.prepare('SELECT * FROM appointments WHERE id = ?').get(result.lastInsertRowid);
+    const appt = await db.prepare('SELECT * FROM appointments WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ success: true, data: appt });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, status, consultant_id, clinic_branch } = req.body;
-    db.prepare(`
-      UPDATE appointments SET patient_id=?, doctor_id=?, appointment_date=?, appointment_time=?, purpose=?, notes=?, status=?, consultant_id=?, clinic_branch=?
+    await db.prepare(`
+      UPDATE appointments SET patient_id=?, doctor_id=?, appointment_date=?, appointment_time=?,
+        purpose=?, notes=?, status=?, consultant_id=?, clinic_branch=?
       WHERE id=?
     `).run(patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, status, consultant_id, clinic_branch, req.params.id);
-    const appt = db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
+    const appt = await db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
     res.json({ success: true, data: appt });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    db.prepare('DELETE FROM appointments WHERE id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM appointments WHERE id = ?').run(req.params.id);
     res.json({ success: true, message: 'Appointment deleted' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 module.exports = router;
