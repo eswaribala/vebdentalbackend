@@ -5,12 +5,14 @@ const db = getDb();
 const { v4: uuidv4 } = require('uuid');
 
 function calcAge(dob) {
-  const today = new Date();
+  if (!dob) return null;
   const birth = new Date(dob);
+  if (isNaN(birth.getTime())) return null;
+  const today = new Date();
   let age = today.getFullYear() - birth.getFullYear();
   const m = today.getMonth() - birth.getMonth();
   if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-  return age;
+  return age >= 0 ? age : null;
 }
 
 function generatePatientId() {
@@ -54,15 +56,16 @@ router.get('/:id', (req, res) => {
 router.post('/', (req, res) => {
   try {
     const {
-      first_name, last_name, mobile, dob, gender, address,
+      first_name, last_name, mobile, dob, age: manualAge, gender, address,
       blood_group, medical_history, allergies, emergency_contact, clinic_branch
     } = req.body;
     const patient_id = generatePatientId();
-    const age = calcAge(dob);
+    // DOB is optional — use manual age when DOB is not provided
+    const age = dob ? calcAge(dob) : (manualAge != null ? parseInt(manualAge, 10) : null);
     const result = db.prepare(`
       INSERT INTO patients (patient_id, first_name, last_name, mobile, dob, age, gender, address, blood_group, medical_history, allergies, emergency_contact, clinic_branch)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(patient_id, first_name, last_name, mobile, dob, age, gender, address, blood_group, medical_history, allergies, emergency_contact, clinic_branch || 'Avadi');
+    `).run(patient_id, first_name, last_name, mobile, dob || '', age, gender || '', address || '', blood_group || '', medical_history || '', allergies || '', emergency_contact || '', clinic_branch || 'Avadi');
     const patient = db.prepare('SELECT * FROM patients WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({ success: true, data: patient });
   } catch (err) {
@@ -74,16 +77,16 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const {
-      first_name, last_name, mobile, dob, gender, address,
+      first_name, last_name, mobile, dob, age: manualAge, gender, address,
       blood_group, medical_history, allergies, emergency_contact, clinic_branch
     } = req.body;
-    const age = calcAge(dob);
+    const age = dob ? calcAge(dob) : (manualAge != null ? parseInt(manualAge, 10) : null);
     db.prepare(`
       UPDATE patients SET first_name=?, last_name=?, mobile=?, dob=?, age=?, gender=?,
       address=?, blood_group=?, medical_history=?, allergies=?, emergency_contact=?,
       clinic_branch=?, updated_at=CURRENT_TIMESTAMP
       WHERE id=?
-    `).run(first_name, last_name, mobile, dob, age, gender, address, blood_group, medical_history, allergies, emergency_contact, clinic_branch || 'Avadi', req.params.id);
+    `).run(first_name, last_name, mobile, dob || '', age, gender || '', address || '', blood_group || '', medical_history || '', allergies || '', emergency_contact || '', clinic_branch || 'Avadi', req.params.id);
     const patient = db.prepare('SELECT * FROM patients WHERE id = ?').get(req.params.id);
     res.json({ success: true, data: patient });
   } catch (err) {

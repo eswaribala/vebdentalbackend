@@ -141,11 +141,18 @@ function createTables(wrapper) {
     notes TEXT,
     created_at TEXT DEFAULT (datetime('now')))`);
 
-  // Migrations for existing databases
+  // Migrations — additive only, never drops data
   try { wrapper.exec('ALTER TABLE appointments ADD COLUMN consultant_id INTEGER'); } catch (e) {}
   try { wrapper.exec("ALTER TABLE appointments ADD COLUMN clinic_branch TEXT DEFAULT 'Avadi'"); } catch (e) {}
   try { wrapper.exec("ALTER TABLE patients ADD COLUMN clinic_branch TEXT DEFAULT 'Avadi'"); } catch (e) {}
   try { wrapper.exec('ALTER TABLE diagnosis ADD COLUMN consultant_id INTEGER'); } catch (e) {}
+  // Doctor attendance support
+  try { wrapper.exec('ALTER TABLE attendance ADD COLUMN doctor_id INTEGER'); } catch (e) {}
+  // Owner-doctor identification
+  try { wrapper.exec('ALTER TABLE doctors ADD COLUMN is_owner INTEGER DEFAULT 0'); } catch (e) {}
+  // Mark Dr. Vignesh (or first doctor) as the owner-doctor
+  try { wrapper.exec("UPDATE doctors SET is_owner = 1 WHERE name LIKE '%Vignesh%'"); } catch (e) {}
+  try { wrapper.exec("UPDATE doctors SET is_owner = 1 WHERE is_owner = 0 AND id = (SELECT id FROM doctors ORDER BY id ASC LIMIT 1) AND NOT EXISTS (SELECT 1 FROM doctors WHERE is_owner = 1)"); } catch (e) {}
 }
 
 async function initializeDatabase() {
