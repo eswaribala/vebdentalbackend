@@ -250,6 +250,17 @@ async function createTables(db) {
     try { await pool.query(m); } catch { /* column already exists — safe to ignore */ }
   }
 
+  // Migrate old check_in/check_out → morning_in/evening_in for legacy records
+  await pool.query(`
+    UPDATE attendance
+    SET
+      morning_in  = CASE WHEN check_in::time <  '14:00'::time THEN check_in  ELSE morning_in  END,
+      morning_out = CASE WHEN check_in::time <  '14:00'::time THEN check_out ELSE morning_out END,
+      evening_in  = CASE WHEN check_in::time >= '14:00'::time THEN check_in  ELSE evening_in  END,
+      evening_out = CASE WHEN check_in::time >= '14:00'::time THEN check_out ELSE evening_out END
+    WHERE morning_in IS NULL AND evening_in IS NULL AND check_in IS NOT NULL
+  `);
+
   // Mark Dr. Vignesh as the owner-doctor
   await pool.query(`UPDATE doctors SET is_owner = 1 WHERE name ILIKE '%Vignesh%'`);
   await pool.query(`
