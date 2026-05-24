@@ -1,12 +1,9 @@
 const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
-const dbUrl = process.env.DATABASE_URL;
-console.log('DATABASE_URL present:', !!dbUrl, dbUrl ? `(starts with: ${dbUrl.substring(0, 20)}...)` : '(MISSING)');
-
 const pool = new Pool({
-  connectionString: dbUrl,
-  ssl: dbUrl ? { rejectUnauthorized: false } : false,
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
 // ── Compatibility wrapper ──────────────────────────────────────────────────────
@@ -244,6 +241,10 @@ async function createTables(db) {
     `ALTER TABLE diagnosis     ADD COLUMN IF NOT EXISTS consultant_id  INTEGER`,
     `ALTER TABLE attendance    ADD COLUMN IF NOT EXISTS doctor_id      INTEGER`,
     `ALTER TABLE doctors       ADD COLUMN IF NOT EXISTS is_owner       INTEGER DEFAULT 0`,
+    `ALTER TABLE attendance    ADD COLUMN IF NOT EXISTS morning_in     TEXT`,
+    `ALTER TABLE attendance    ADD COLUMN IF NOT EXISTS morning_out    TEXT`,
+    `ALTER TABLE attendance    ADD COLUMN IF NOT EXISTS evening_in     TEXT`,
+    `ALTER TABLE attendance    ADD COLUMN IF NOT EXISTS evening_out    TEXT`,
   ];
   for (const m of migrations) {
     try { await pool.query(m); } catch { /* column already exists — safe to ignore */ }

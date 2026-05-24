@@ -29,6 +29,91 @@ router.get('/', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// income-report — before /:id to avoid route conflict
+router.get('/income-report', async (req, res) => {
+  try {
+    const { period = 'monthly', year, branch } = req.query;
+    const yr = parseInt(year) || new Date().getFullYear();
+    const yearPattern = `${yr}%`;
+
+    let branchWhere = '';
+    const branchParams = [];
+    if (branch) {
+      branchWhere = " AND COALESCE(p.clinic_branch, 'Avadi') = ?";
+      branchParams.push(branch);
+    }
+
+    const summary = await db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0) AS total_paid,
+        COALESCE(SUM(CASE WHEN b.payment_status IN ('pending','partial') THEN b.total_amount ELSE 0 END), 0) AS total_pending,
+        CAST(SUM(CASE WHEN b.payment_status IN ('pending','partial') THEN 1 ELSE 0 END) AS INTEGER) AS pending_count,
+        CAST(SUM(CASE WHEN b.payment_mode = 'emi' AND (b.emi_months - COALESCE(b.emi_paid,0)) > 0 THEN 1 ELSE 0 END) AS INTEGER) AS emi_count,
+        COALESCE(SUM(CASE WHEN b.payment_mode = 'emi'
+          THEN (b.emi_months - COALESCE(b.emi_paid,0)) * COALESCE(b.emi_amount,0)
+          ELSE 0 END), 0) AS emi_remaining
+      FROM bills b
+      LEFT JOIN patients p ON b.patient_id = p.id
+      WHERE b.bill_date LIKE ?${branchWhere}
+    `).get(yearPattern, ...branchParams);
+
+    let trend;
+    if (period === 'weekly') {
+      trend = await db.prepare(`
+        SELECT
+          TO_CHAR(b.bill_date::date, 'IYYY"-W"IW') AS period_key,
+          COALESCE(SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0) AS paid,
+          COALESCE(SUM(CASE WHEN b.payment_status IN ('pending','partial') THEN b.total_amount ELSE 0 END), 0) AS pending,
+          CAST(COUNT(*) AS INTEGER) AS count
+        FROM bills b
+        LEFT JOIN patients p ON b.patient_id = p.id
+        WHERE b.bill_date LIKE ?${branchWhere}
+        GROUP BY TO_CHAR(b.bill_date::date, 'IYYY"-W"IW')
+        ORDER BY period_key ASC
+      `).all(yearPattern, ...branchParams);
+    } else {
+      trend = await db.prepare(`
+        SELECT
+          SUBSTR(b.bill_date, 1, 7) AS period_key,
+          COALESCE(SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0) AS paid,
+          COALESCE(SUM(CASE WHEN b.payment_status IN ('pending','partial') THEN b.total_amount ELSE 0 END), 0) AS pending,
+          CAST(COUNT(*) AS INTEGER) AS count
+        FROM bills b
+        LEFT JOIN patients p ON b.patient_id = p.id
+        WHERE b.bill_date LIKE ?${branchWhere}
+        GROUP BY SUBSTR(b.bill_date, 1, 7)
+        ORDER BY period_key ASC
+      `).all(yearPattern, ...branchParams);
+    }
+
+    const pendingBills = await db.prepare(`
+      SELECT b.id, b.bill_number, b.total_amount, b.payment_status, b.payment_mode,
+             b.bill_date, b.emi_months, b.emi_amount, b.emi_paid,
+             p.first_name, p.last_name, p.patient_id AS p_id
+      FROM bills b
+      LEFT JOIN patients p ON b.patient_id = p.id
+      WHERE b.payment_status IN ('pending','partial')${branchWhere}
+      ORDER BY b.bill_date DESC
+      LIMIT 30
+    `).all(...branchParams);
+
+    const emiBills = await db.prepare(`
+      SELECT b.id, b.bill_number, b.total_amount, b.payment_status,
+             b.emi_months, b.emi_amount, b.emi_paid, b.bill_date,
+             p.first_name, p.last_name, p.patient_id AS p_id,
+             (b.emi_months - COALESCE(b.emi_paid,0)) AS emi_remaining_count,
+             (b.emi_months - COALESCE(b.emi_paid,0)) * COALESCE(b.emi_amount,0) AS emi_remaining_amount
+      FROM bills b
+      LEFT JOIN patients p ON b.patient_id = p.id
+      WHERE b.payment_mode = 'emi'
+        AND (b.emi_months - COALESCE(b.emi_paid,0)) > 0${branchWhere}
+      ORDER BY b.bill_date DESC
+    `).all(...branchParams);
+
+    res.json({ success: true, data: { summary, trend, pending_bills: pendingBills, emi_bills: emiBills, year: yr, period } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // stats must be declared before /:id to avoid matching 'stats'
 router.get('/stats/summary', async (req, res) => {
   try {

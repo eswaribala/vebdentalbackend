@@ -67,6 +67,29 @@ router.get('/today', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Owner's external-clinic blocked slots — accessible to any authenticated user
+router.get('/owner-blocked-slots', async (req, res) => {
+  try {
+    const ownerDoc = await db.prepare('SELECT id FROM doctors WHERE is_owner = 1 LIMIT 1').get()
+      || await db.prepare('SELECT id FROM doctors ORDER BY id ASC LIMIT 1').get();
+    const owner_doctor_id = ownerDoc ? ownerDoc.id : null;
+
+    const { date } = req.query;
+    if (!date) return res.json({ success: true, data: [], owner_doctor_id });
+
+    const extSlots = await db.prepare(`
+      SELECT appointment_time FROM owner_appointments
+      WHERE appointment_date = ? AND appointment_time IS NOT NULL AND appointment_time != ''
+    `).all(date);
+
+    res.json({
+      success: true,
+      data: extSlots.map(r => r.appointment_time),
+      owner_doctor_id,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const appt = await db.prepare(`

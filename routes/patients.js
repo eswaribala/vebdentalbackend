@@ -15,10 +15,13 @@ function calcAge(dob) {
 }
 
 async function generatePatientId() {
-  const row = await db.prepare('SELECT CAST(COUNT(*) AS INTEGER) as c FROM patients').get();
-  const count = (row?.c ?? 0) + 1;
   const year = new Date().getFullYear().toString().slice(-2);
-  return `VEB${year}${String(count).padStart(4, '0')}`;
+  const prefix = `VEB${year}`;
+  const row = await db.prepare(
+    `SELECT MAX(CAST(SUBSTR(patient_id, 6) AS INTEGER)) as max_num FROM patients WHERE patient_id LIKE '${prefix}%'`
+  ).get();
+  const nextNum = (row?.max_num ?? 0) + 1;
+  return `${prefix}${String(nextNum).padStart(4, '0')}`;
 }
 
 router.get('/', async (req, res) => {
