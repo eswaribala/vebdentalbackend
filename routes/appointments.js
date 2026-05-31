@@ -84,7 +84,7 @@ router.get('/owner-blocked-slots', async (req, res) => {
 
     res.json({
       success: true,
-      data: extSlots.map(r => r.appointment_time),
+      data: extSlots.flatMap(r => (r.appointment_time || '').split(',').map(t => t.trim()).filter(Boolean)),
       owner_doctor_id,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }

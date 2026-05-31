@@ -42,10 +42,50 @@ router.get('/blocked-slots', requireOwner, async (req, res) => {
       : [];
 
     const blocked = [...new Set([
-      ...ownerSlots.map(r => r.appointment_time),
-      ...clinicSlots.map(r => r.appointment_time),
+      ...ownerSlots.flatMap(r => (r.appointment_time || '').split(',').map(t => t.trim()).filter(Boolean)),
+      ...clinicSlots.flatMap(r => (r.appointment_time || '').split(',').map(t => t.trim()).filter(Boolean)),
     ])];
     res.json({ success: true, data: blocked, owner_doctor_id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Owner's clinic slots (for conflict detection in external consulting) ──────
+// Returns both own-clinic appointments AND existing owner_appointments so that
+// the "Add Consulting" form can highlight ALL occupied slots in red.
+
+router.get('/clinic-slots', requireOwner, async (req, res) => {
+  try {
+    const ownerDoc = await db.prepare('SELECT id FROM doctors WHERE is_owner = 1 LIMIT 1').get()
+      || await db.prepare('SELECT id FROM doctors ORDER BY id ASC LIMIT 1').get();
+    const owner_doctor_id = ownerDoc ? ownerDoc.id : null;
+
+    const { date, month, year, exclude_id } = req.query;
+    const rows = [];
+
+    // 1. Clinic appointments (own clinics – Avadi / Thiruninravur)
+    if (owner_doctor_id) {
+      let q = `SELECT appointment_date, appointment_time, clinic_branch FROM appointments WHERE doctor_id = ? AND status != 'cancelled'`;
+      const p = [owner_doctor_id];
+      if (date) { q += ' AND appointment_date = ?'; p.push(date); }
+      else if (month && year) { q += ' AND appointment_date LIKE ?'; p.push(`${year}-${String(month).padStart(2, '0')}%`); }
+      else if (year) { q += ' AND appointment_date LIKE ?'; p.push(`${year}%`); }
+      q += ' ORDER BY appointment_date ASC, appointment_time ASC';
+      rows.push(...await db.prepare(q).all(...p));
+    }
+
+    // 2. External consulting appointments – owner_appointments (e.g. Yuva Dental)
+    {
+      let q = `SELECT appointment_date, appointment_time, clinic_name AS clinic_branch FROM owner_appointments WHERE appointment_time IS NOT NULL AND appointment_time != ''`;
+      const p = [];
+      if (date) { q += ' AND appointment_date = ?'; p.push(date); }
+      else if (month && year) { q += ' AND appointment_date LIKE ?'; p.push(`${year}-${String(month).padStart(2, '0')}%`); }
+      else if (year) { q += ' AND appointment_date LIKE ?'; p.push(`${year}%`); }
+      if (exclude_id) { q += ' AND id != ?'; p.push(exclude_id); }
+      q += ' ORDER BY appointment_date ASC, appointment_time ASC';
+      rows.push(...await db.prepare(q).all(...p));
+    }
+
+    res.json({ success: true, data: rows });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -53,10 +93,13 @@ router.get('/blocked-slots', requireOwner, async (req, res) => {
 
 router.get('/appointments', requireOwner, async (req, res) => {
   try {
-    const { month, year } = req.query;
+    const { month, year, date } = req.query;
     let query  = 'SELECT * FROM owner_appointments';
     const params = [];
-    if (month && year) {
+    if (date) {
+      query += ' WHERE appointment_date = ?';
+      params.push(date);
+    } else if (month && year) {
       query += ' WHERE appointment_date LIKE ?';
       params.push(`${year}-${String(month).padStart(2, '0')}%`);
     } else if (year) {
