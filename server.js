@@ -11,6 +11,16 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const ms = Date.now() - start;
+    const email = req.body?.email ? ` [${req.body.email}]` : '';
+    console.log(`${req.method} ${req.path}${email} → ${res.statusCode} (${ms}ms)`);
+  });
+  next();
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', clinic: 'VEB DENTAL CARE', timestamp: new Date() });
 });
