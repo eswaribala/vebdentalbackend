@@ -13,14 +13,11 @@ router.get('/payments/summary', async (req, res) => {
   try {
     const rows = await db.prepare(`
       SELECT s.id as consultant_id, s.name, s.department, s.mobile,
-             CAST(COUNT(DISTINCT cp.id) AS INTEGER)  as payment_count,
-             COALESCE(SUM(cp.amount), 0)             as total_paid,
-             CAST(COUNT(DISTINCT a.id) AS INTEGER)   as appointment_count
+             CAST((SELECT COUNT(*) FROM consultant_payments cp WHERE cp.consultant_id = s.id) AS INTEGER) as payment_count,
+             COALESCE((SELECT SUM(cp.amount) FROM consultant_payments cp WHERE cp.consultant_id = s.id), 0) as total_paid,
+             CAST((SELECT COUNT(*) FROM appointments a WHERE a.consultant_id = s.id) AS INTEGER) as appointment_count
       FROM staff s
-      LEFT JOIN consultant_payments cp ON cp.consultant_id = s.id
-      LEFT JOIN appointments a         ON a.consultant_id  = s.id
       WHERE s.role = 'Consultant' AND s.is_active = 1
-      GROUP BY s.id, s.name, s.department, s.mobile
       ORDER BY total_paid DESC
     `).all();
     const grand_total = rows.reduce((sum, r) => sum + parseFloat(r.total_paid || 0), 0);
