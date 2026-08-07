@@ -219,6 +219,38 @@ router.post('/', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+router.post('/auto-mark-absent', async (req, res) => {
+  try {
+    const { date: today, time: now } = getIST();
+    const hour = parseInt(now.split(':')[0], 10);
+    if (hour < 20) return res.json({ success: true, marked: 0 });
+
+    const allStaff = await db.prepare(
+      `SELECT id FROM staff WHERE is_active = 1 AND LOWER(role) != 'consultant'`
+    ).all();
+    const allDoctors = await db.prepare(
+      `SELECT id FROM doctors WHERE is_active = 1 AND (is_owner IS NULL OR is_owner = 0)`
+    ).all();
+
+    let marked = 0;
+    for (const s of allStaff) {
+      const existing = await db.prepare('SELECT id FROM attendance WHERE staff_id = ? AND date = ?').get(s.id, today);
+      if (!existing) {
+        await db.prepare('INSERT INTO attendance (staff_id, date, status) VALUES (?, ?, ?)').run(s.id, today, 'absent');
+        marked++;
+      }
+    }
+    for (const d of allDoctors) {
+      const existing = await db.prepare('SELECT id FROM attendance WHERE doctor_id = ? AND date = ?').get(d.id, today);
+      if (!existing) {
+        await db.prepare('INSERT INTO attendance (doctor_id, date, status) VALUES (?, ?, ?)').run(d.id, today, 'absent');
+        marked++;
+      }
+    }
+    res.json({ success: true, marked });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.put('/:id', async (req, res) => {
   try {
     const { check_in, check_out, status, notes } = req.body;
