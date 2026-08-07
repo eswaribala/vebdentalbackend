@@ -219,6 +219,64 @@ router.post('/', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+router.post('/backfill-absent', async (req, res) => {
+  try {
+    const { month, year } = req.body;
+    const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const todayIST = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}-${String(ist.getDate()).padStart(2, '0')}`;
+
+    const yr = parseInt(year) || ist.getFullYear();
+    const mo = String(parseInt(month) || (ist.getMonth() + 1)).padStart(2, '0');
+    const pattern = `${yr}-${mo}%`;
+
+    // Build list of past days in the requested month (exclude today and future)
+    const days = [];
+    const cursor = new Date(`${yr}-${mo}-01T00:00:00`);
+    while (true) {
+      const ds = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
+      if (!ds.startsWith(`${yr}-${mo}`) || ds >= todayIST) break;
+      days.push(ds);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    if (days.length === 0) return res.json({ success: true, marked: 0 });
+
+    // Existing records for the month — fetch once, use a Set for O(1) lookup
+    const existingStaff = new Set(
+      (await db.prepare(`SELECT staff_id, date FROM attendance WHERE date LIKE ? AND staff_id IS NOT NULL`).all(pattern))
+        .map(r => `${r.staff_id}:${r.date}`)
+    );
+    const existingDoctor = new Set(
+      (await db.prepare(`SELECT doctor_id, date FROM attendance WHERE date LIKE ? AND doctor_id IS NOT NULL`).all(pattern))
+        .map(r => `${r.doctor_id}:${r.date}`)
+    );
+
+    const allStaff = await db.prepare(
+      `SELECT id FROM staff WHERE is_active = 1 AND LOWER(role) != 'consultant'`
+    ).all();
+    const allDoctors = await db.prepare(
+      `SELECT id FROM doctors WHERE is_active = 1 AND (is_owner IS NULL OR is_owner = 0)`
+    ).all();
+
+    let marked = 0;
+    for (const day of days) {
+      for (const s of allStaff) {
+        if (!existingStaff.has(`${s.id}:${day}`)) {
+          await db.prepare('INSERT INTO attendance (staff_id, date, status) VALUES (?, ?, ?)').run(s.id, day, 'absent');
+          marked++;
+        }
+      }
+      for (const doc of allDoctors) {
+        if (!existingDoctor.has(`${doc.id}:${day}`)) {
+          await db.prepare('INSERT INTO attendance (doctor_id, date, status) VALUES (?, ?, ?)').run(doc.id, day, 'absent');
+          marked++;
+        }
+      }
+    }
+
+    res.json({ success: true, marked, days: days.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post('/auto-mark-absent', async (req, res) => {
   try {
     const { date: today, time: now } = getIST();
