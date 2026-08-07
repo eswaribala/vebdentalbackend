@@ -116,6 +116,8 @@ router.get('/summary', async (req, res) => {
         }
         const person = map.get(key);
         if (row.date) {                          // skip NULL rows (no records for this month)
+          // Dedup: if a duplicate DB row exists for the same date, take the first only
+          if (person.records.some(r => r.date === row.date)) return;
           person.records.push({
             date:        row.date,
             morning_in:  row.morning_in,
