@@ -34,7 +34,6 @@ router.get('/income-report', async (req, res) => {
   try {
     const { period = 'monthly', year, branch } = req.query;
     const yr = parseInt(year) || new Date().getFullYear();
-    const yearPattern = `${yr}%`;
 
     let branchWhere = '';
     const branchParams = [];
@@ -43,6 +42,22 @@ router.get('/income-report', async (req, res) => {
       branchParams.push(branch);
     }
 
+    // Current month stats — always included regardless of selected period
+    const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    const curMonthPattern = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}%`;
+    const curMonthLabel   = ist.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    const currentMonth = await db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0)                        AS received,
+        COALESCE(SUM(CASE WHEN b.payment_status IN ('pending','partial') THEN b.total_amount ELSE 0 END), 0)         AS pending,
+        CAST(COUNT(*) AS INTEGER)                                                                                      AS count
+      FROM bills b
+      LEFT JOIN patients p ON b.patient_id = p.id
+      WHERE b.bill_date LIKE ?${branchWhere}
+    `).get(curMonthPattern, ...branchParams);
+
+    // Summary scope: yearly = all-time, monthly/weekly = selected year
+    const summaryPattern = period === 'yearly' ? '%' : `${yr}%`;
     const summary = await db.prepare(`
       SELECT
         COALESCE(SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0) AS total_paid,
@@ -55,10 +70,23 @@ router.get('/income-report', async (req, res) => {
       FROM bills b
       LEFT JOIN patients p ON b.patient_id = p.id
       WHERE b.bill_date LIKE ?${branchWhere}
-    `).get(yearPattern, ...branchParams);
+    `).get(summaryPattern, ...branchParams);
 
     let trend;
-    if (period === 'weekly') {
+    if (period === 'yearly') {
+      trend = await db.prepare(`
+        SELECT
+          SUBSTR(b.bill_date, 1, 4) AS period_key,
+          COALESCE(SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0) AS paid,
+          COALESCE(SUM(CASE WHEN b.payment_status IN ('pending','partial') THEN b.total_amount ELSE 0 END), 0) AS pending,
+          CAST(COUNT(*) AS INTEGER) AS count
+        FROM bills b
+        LEFT JOIN patients p ON b.patient_id = p.id
+        WHERE 1=1${branchWhere}
+        GROUP BY SUBSTR(b.bill_date, 1, 4)
+        ORDER BY period_key ASC
+      `).all(...branchParams);
+    } else if (period === 'weekly') {
       trend = await db.prepare(`
         SELECT
           TO_CHAR(b.bill_date::date, 'IYYY"-W"IW') AS period_key,
@@ -70,7 +98,7 @@ router.get('/income-report', async (req, res) => {
         WHERE b.bill_date LIKE ?${branchWhere}
         GROUP BY TO_CHAR(b.bill_date::date, 'IYYY"-W"IW')
         ORDER BY period_key ASC
-      `).all(yearPattern, ...branchParams);
+      `).all(`${yr}%`, ...branchParams);
     } else {
       trend = await db.prepare(`
         SELECT
@@ -83,7 +111,7 @@ router.get('/income-report', async (req, res) => {
         WHERE b.bill_date LIKE ?${branchWhere}
         GROUP BY SUBSTR(b.bill_date, 1, 7)
         ORDER BY period_key ASC
-      `).all(yearPattern, ...branchParams);
+      `).all(`${yr}%`, ...branchParams);
     }
 
     const pendingBills = await db.prepare(`
@@ -110,7 +138,11 @@ router.get('/income-report', async (req, res) => {
       ORDER BY b.bill_date DESC
     `).all(...branchParams);
 
-    res.json({ success: true, data: { summary, trend, pending_bills: pendingBills, emi_bills: emiBills, year: yr, period } });
+    res.json({ success: true, data: {
+      summary, trend,
+      current_month: { ...currentMonth, label: curMonthLabel },
+      pending_bills: pendingBills, emi_bills: emiBills, year: yr, period,
+    }});
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
