@@ -87,18 +87,19 @@ router.get('/income-report', async (req, res) => {
         ORDER BY period_key ASC
       `).all(...branchParams);
     } else if (period === 'weekly') {
+      // Always current month — group days 1-7 → Wk1, 8-14 → Wk2, 15-21 → Wk3, 22+ → Wk4
       trend = await db.prepare(`
         SELECT
-          TO_CHAR(b.bill_date::date, 'IYYY"-W"IW') AS period_key,
+          CAST(CEIL(EXTRACT(DAY FROM b.bill_date::date) / 7.0) AS INTEGER) AS period_key,
           COALESCE(SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0) AS paid,
           COALESCE(SUM(CASE WHEN b.payment_status IN ('pending','partial') THEN b.total_amount ELSE 0 END), 0) AS pending,
           CAST(COUNT(*) AS INTEGER) AS count
         FROM bills b
         LEFT JOIN patients p ON b.patient_id = p.id
         WHERE b.bill_date LIKE ?${branchWhere}
-        GROUP BY TO_CHAR(b.bill_date::date, 'IYYY"-W"IW')
+        GROUP BY CAST(CEIL(EXTRACT(DAY FROM b.bill_date::date) / 7.0) AS INTEGER)
         ORDER BY period_key ASC
-      `).all(`${yr}%`, ...branchParams);
+      `).all(curMonthPattern, ...branchParams);
     } else {
       trend = await db.prepare(`
         SELECT
