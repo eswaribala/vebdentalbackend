@@ -59,7 +59,7 @@ router.get('/income-report', async (req, res) => {
         CAST(COUNT(*) AS INTEGER)                                                                                      AS count
       FROM bills b
       LEFT JOIN patients p ON b.patient_id = p.id
-      WHERE b.bill_date LIKE ?${branchWhere}
+      WHERE b.bill_date LIKE ? AND b.payment_status != 'voided'${branchWhere}
     `).get(curMonthPattern, ...branchParams);
 
     // Summary scope: yearly = all-time, monthly/weekly = selected year
@@ -75,7 +75,7 @@ router.get('/income-report', async (req, res) => {
           ELSE 0 END), 0) AS emi_remaining
       FROM bills b
       LEFT JOIN patients p ON b.patient_id = p.id
-      WHERE b.bill_date LIKE ?${branchWhere}
+      WHERE b.bill_date LIKE ? AND b.payment_status != 'voided'${branchWhere}
     `).get(summaryPattern, ...branchParams);
 
     let trend;
@@ -88,7 +88,7 @@ router.get('/income-report', async (req, res) => {
           CAST(COUNT(*) AS INTEGER) AS count
         FROM bills b
         LEFT JOIN patients p ON b.patient_id = p.id
-        WHERE 1=1${branchWhere}
+        WHERE b.payment_status != 'voided'${branchWhere}
         GROUP BY SUBSTR(b.bill_date, 1, 4)
         ORDER BY period_key ASC
       `).all(...branchParams);
@@ -102,7 +102,7 @@ router.get('/income-report', async (req, res) => {
           CAST(COUNT(*) AS INTEGER) AS count
         FROM bills b
         LEFT JOIN patients p ON b.patient_id = p.id
-        WHERE b.bill_date LIKE ?${branchWhere}
+        WHERE b.bill_date LIKE ? AND b.payment_status != 'voided'${branchWhere}
         GROUP BY CAST(CEIL(EXTRACT(DAY FROM b.bill_date::date) / 7.0) AS INTEGER)
         ORDER BY period_key ASC
       `).all(curMonthPattern, ...branchParams);
@@ -115,7 +115,7 @@ router.get('/income-report', async (req, res) => {
           CAST(COUNT(*) AS INTEGER) AS count
         FROM bills b
         LEFT JOIN patients p ON b.patient_id = p.id
-        WHERE b.bill_date LIKE ?${branchWhere}
+        WHERE b.bill_date LIKE ? AND b.payment_status != 'voided'${branchWhere}
         GROUP BY SUBSTR(b.bill_date, 1, 7)
         ORDER BY period_key ASC
       `).all(`${yr}%`, ...branchParams);
@@ -127,7 +127,7 @@ router.get('/income-report', async (req, res) => {
              p.first_name, p.last_name, p.patient_id AS p_id
       FROM bills b
       LEFT JOIN patients p ON b.patient_id = p.id
-      WHERE b.payment_status IN ('pending','partial')${branchWhere}
+      WHERE b.payment_status IN ('pending','partial') AND b.payment_status != 'voided'${branchWhere}
       ORDER BY b.bill_date DESC
       LIMIT 30
     `).all(...branchParams);
@@ -141,7 +141,8 @@ router.get('/income-report', async (req, res) => {
       FROM bills b
       LEFT JOIN patients p ON b.patient_id = p.id
       WHERE b.payment_mode = 'emi'
-        AND (b.emi_months - COALESCE(b.emi_paid,0)) > 0${branchWhere}
+        AND (b.emi_months - COALESCE(b.emi_paid,0)) > 0
+        AND b.payment_status != 'voided'${branchWhere}
       ORDER BY b.bill_date DESC
     `).all(...branchParams);
 
@@ -166,7 +167,7 @@ router.get('/stats/summary', async (req, res) => {
       "SELECT COALESCE(SUM(total_amount),0) as total FROM bills WHERE bill_date LIKE ? AND payment_status='paid'"
     ).get(`${today.slice(0, 7)}%`);
     const pending = await db.prepare(
-      "SELECT CAST(COUNT(*) AS INTEGER) as c, COALESCE(SUM(total_amount),0) as total FROM bills WHERE payment_status='pending'"
+      "SELECT CAST(COUNT(*) AS INTEGER) as c, COALESCE(SUM(total_amount),0) as total FROM bills WHERE payment_status='pending' AND payment_status != 'voided'"
     ).get();
 
     res.json({
@@ -251,6 +252,16 @@ router.put('/:id', async (req, res) => {
     const bill = await db.prepare('SELECT * FROM bills WHERE id = ?').get(req.params.id);
     if (bill && bill.items) bill.items = JSON.parse(bill.items);
     res.json({ success: true, data: bill });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch('/:id/void', async (req, res) => {
+  try {
+    const bill = await db.prepare('SELECT id, payment_status FROM bills WHERE id = ?').get(req.params.id);
+    if (!bill) return res.status(404).json({ error: 'Bill not found' });
+    if (bill.payment_status === 'voided') return res.status(400).json({ error: 'Bill is already voided' });
+    await db.prepare("UPDATE bills SET payment_status = 'voided' WHERE id = ?").run(req.params.id);
+    res.json({ success: true, message: 'Bill voided' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
