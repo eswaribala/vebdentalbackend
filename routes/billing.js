@@ -4,11 +4,17 @@ const { getDb } = require('../database');
 const db = getDb();
 
 async function generateBillNumber() {
-  const row = await db.prepare('SELECT CAST(COUNT(*) AS INTEGER) as c FROM bills').get();
-  const count = (row?.c ?? 0) + 1;
-  const year  = new Date().getFullYear().toString().slice(-2);
-  const month = String(new Date().getMonth() + 1).padStart(2, '0');
-  return `VEB-B${year}${month}${String(count).padStart(4, '0')}`;
+  const year   = new Date().getFullYear().toString().slice(-2);
+  const month  = String(new Date().getMonth() + 1).padStart(2, '0');
+  const prefix = `VEB-B${year}${month}`;
+  // prefix is always 9 chars (VEB-B + 2-digit year + 2-digit month)
+  // Use MAX on the numeric suffix so deletions never cause a collision
+  const row = await db.prepare(
+    `SELECT COALESCE(MAX(CAST(SUBSTRING(bill_number FROM 10) AS INTEGER)), 0) AS max_seq
+     FROM bills WHERE bill_number LIKE ?`
+  ).get(`${prefix}%`);
+  const seq = (row?.max_seq ?? 0) + 1;
+  return `${prefix}${String(seq).padStart(4, '0')}`;
 }
 
 router.get('/', async (req, res) => {
