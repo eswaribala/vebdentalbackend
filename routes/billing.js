@@ -170,6 +170,25 @@ router.get('/stats/summary', async (req, res) => {
       "SELECT CAST(COUNT(*) AS INTEGER) as c, COALESCE(SUM(total_amount),0) as total FROM bills WHERE payment_status='pending' AND payment_status != 'voided'"
     ).get();
 
+    const todayByBranch = await db.prepare(`
+      SELECT COALESCE(p.clinic_branch, 'Avadi') AS branch, COALESCE(SUM(b.total_amount),0) AS total
+      FROM bills b LEFT JOIN patients p ON b.patient_id = p.id
+      WHERE b.bill_date = ? AND b.payment_status = 'paid'
+      GROUP BY COALESCE(p.clinic_branch, 'Avadi')
+    `).all(today);
+    const monthByBranch = await db.prepare(`
+      SELECT COALESCE(p.clinic_branch, 'Avadi') AS branch, COALESCE(SUM(b.total_amount),0) AS total
+      FROM bills b LEFT JOIN patients p ON b.patient_id = p.id
+      WHERE b.bill_date LIKE ? AND b.payment_status = 'paid'
+      GROUP BY COALESCE(p.clinic_branch, 'Avadi')
+    `).all(`${today.slice(0, 7)}%`);
+
+    const toBranchMap = (rows) => {
+      const map = { Avadi: 0, Thiruninravur: 0 };
+      for (const row of rows) map[row.branch] = parseFloat(row.total || 0);
+      return map;
+    };
+
     res.json({
       success: true,
       data: {
@@ -177,6 +196,8 @@ router.get('/stats/summary', async (req, res) => {
         month_revenue:  parseFloat(monthRevenue?.total  || 0),
         pending_count:  parseInt(pending?.c             || 0, 10),
         pending_amount: parseFloat(pending?.total       || 0),
+        today_revenue_by_branch: toBranchMap(todayByBranch),
+        month_revenue_by_branch: toBranchMap(monthByBranch),
       },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }

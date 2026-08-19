@@ -108,6 +108,20 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, consultant_id, clinic_branch } = req.body;
+
+    // Same patient + same provider + same date + same time = duplicate booking
+    // (catches accidental double-taps and retried requests)
+    const providerColumn = consultant_id ? 'consultant_id' : 'doctor_id';
+    const providerId = consultant_id || doctor_id;
+    const existing = await db.prepare(`
+      SELECT * FROM appointments
+      WHERE patient_id = ? AND ${providerColumn} = ? AND appointment_date = ? AND appointment_time = ?
+        AND status != 'cancelled'
+    `).get(patient_id, providerId, appointment_date, appointment_time);
+    if (existing) {
+      return res.status(200).json({ success: true, data: existing, duplicate: true });
+    }
+
     const result = await db.prepare(`
       INSERT INTO appointments (patient_id, doctor_id, appointment_date, appointment_time, purpose, notes, consultant_id, clinic_branch)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
