@@ -48,10 +48,17 @@ router.get('/income-report', async (req, res) => {
       branchParams.push(branch);
     }
 
-    // Current month stats — always included regardless of selected period
-    const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const curMonthPattern = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}%`;
-    const curMonthLabel   = ist.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    // Current month stats — always included regardless of selected period.
+    // Bounds are computed in Postgres (IST) and compared as a date range, not a
+    // Node-computed string matched with LIKE — a prior LIKE-based approach here
+    // was found to bleed in adjacent months' totals.
+    const bounds = await db.prepare(`
+      SELECT
+        to_char(date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata'))::date, 'YYYY-MM-DD')                        AS month_start,
+        to_char((date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata')) + INTERVAL '1 month')::date, 'YYYY-MM-DD') AS month_end,
+        to_char((NOW() AT TIME ZONE 'Asia/Kolkata'), 'FMMonth YYYY')                                                  AS month_label
+    `).get();
+    const { month_start: curMonthStart, month_end: curMonthEnd, month_label: curMonthLabel } = bounds;
     const currentMonth = await db.prepare(`
       SELECT
         COALESCE(SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0)                        AS received,
@@ -59,8 +66,8 @@ router.get('/income-report', async (req, res) => {
         CAST(COUNT(*) AS INTEGER)                                                                                      AS count
       FROM bills b
       LEFT JOIN patients p ON b.patient_id = p.id
-      WHERE b.bill_date LIKE ? AND b.payment_status != 'voided'${branchWhere}
-    `).get(curMonthPattern, ...branchParams);
+      WHERE b.bill_date::date >= ? AND b.bill_date::date < ? AND b.payment_status != 'voided'${branchWhere}
+    `).get(curMonthStart, curMonthEnd, ...branchParams);
 
     // Summary scope: yearly = all-time, monthly/weekly = selected year
     const summaryPattern = period === 'yearly' ? '%' : `${yr}%`;
@@ -102,10 +109,10 @@ router.get('/income-report', async (req, res) => {
           CAST(COUNT(*) AS INTEGER) AS count
         FROM bills b
         LEFT JOIN patients p ON b.patient_id = p.id
-        WHERE b.bill_date LIKE ? AND b.payment_status != 'voided'${branchWhere}
+        WHERE b.bill_date::date >= ? AND b.bill_date::date < ? AND b.payment_status != 'voided'${branchWhere}
         GROUP BY CAST(CEIL(EXTRACT(DAY FROM b.bill_date::date) / 7.0) AS INTEGER)
         ORDER BY period_key ASC
-      `).all(curMonthPattern, ...branchParams);
+      `).all(curMonthStart, curMonthEnd, ...branchParams);
     } else {
       trend = await db.prepare(`
         SELECT
@@ -157,15 +164,22 @@ router.get('/income-report', async (req, res) => {
 // stats must be declared before /:id to avoid matching 'stats'
 router.get('/stats/summary', async (req, res) => {
   try {
-    const ist   = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const today = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}-${String(ist.getDate()).padStart(2, '0')}`;
+    // Compute "today" and the current-month range entirely in Postgres (IST) so
+    // this can't drift from how bill_date values are compared/parsed there.
+    const bounds = await db.prepare(`
+      SELECT
+        to_char((NOW() AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD')                                            AS today,
+        to_char(date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata'))::date, 'YYYY-MM-DD')                        AS month_start,
+        to_char((date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata')) + INTERVAL '1 month')::date, 'YYYY-MM-DD') AS month_end
+    `).get();
+    const { today, month_start, month_end } = bounds;
 
     const todayRevenue = await db.prepare(
-      "SELECT COALESCE(SUM(total_amount),0) as total FROM bills WHERE bill_date = ? AND payment_status='paid'"
+      "SELECT COALESCE(SUM(total_amount),0) as total FROM bills WHERE bill_date::date = ? AND payment_status='paid'"
     ).get(today);
     const monthRevenue = await db.prepare(
-      "SELECT COALESCE(SUM(total_amount),0) as total FROM bills WHERE bill_date LIKE ? AND payment_status='paid'"
-    ).get(`${today.slice(0, 7)}%`);
+      "SELECT COALESCE(SUM(total_amount),0) as total FROM bills WHERE bill_date::date >= ? AND bill_date::date < ? AND payment_status='paid'"
+    ).get(month_start, month_end);
     const pending = await db.prepare(
       "SELECT CAST(COUNT(*) AS INTEGER) as c, COALESCE(SUM(total_amount),0) as total FROM bills WHERE payment_status='pending' AND payment_status != 'voided'"
     ).get();
@@ -173,15 +187,15 @@ router.get('/stats/summary', async (req, res) => {
     const todayByBranch = await db.prepare(`
       SELECT COALESCE(p.clinic_branch, 'Avadi') AS branch, COALESCE(SUM(b.total_amount),0) AS total
       FROM bills b LEFT JOIN patients p ON b.patient_id = p.id
-      WHERE b.bill_date = ? AND b.payment_status = 'paid'
+      WHERE b.bill_date::date = ? AND b.payment_status = 'paid'
       GROUP BY COALESCE(p.clinic_branch, 'Avadi')
     `).all(today);
     const monthByBranch = await db.prepare(`
       SELECT COALESCE(p.clinic_branch, 'Avadi') AS branch, COALESCE(SUM(b.total_amount),0) AS total
       FROM bills b LEFT JOIN patients p ON b.patient_id = p.id
-      WHERE b.bill_date LIKE ? AND b.payment_status = 'paid'
+      WHERE b.bill_date::date >= ? AND b.bill_date::date < ? AND b.payment_status = 'paid'
       GROUP BY COALESCE(p.clinic_branch, 'Avadi')
-    `).all(`${today.slice(0, 7)}%`);
+    `).all(month_start, month_end);
 
     const toBranchMap = (rows) => {
       const map = { Avadi: 0, Thiruninravur: 0 };
