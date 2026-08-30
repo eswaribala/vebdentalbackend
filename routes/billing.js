@@ -49,16 +49,14 @@ router.get('/income-report', async (req, res) => {
     }
 
     // Current month stats — always included regardless of selected period.
-    // Bounds are computed in Postgres (IST) and compared as a date range, not a
-    // Node-computed string matched with LIKE — a prior LIKE-based approach here
-    // was found to bleed in adjacent months' totals.
+    // Matched against bill_date the same way the monthly trend below groups it
+    // (SUBSTR(bill_date, 1, 7) = 'YYYY-MM'), so the two can never disagree.
     const bounds = await db.prepare(`
       SELECT
-        to_char(date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata'))::date, 'YYYY-MM-DD')                        AS month_start,
-        to_char((date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata')) + INTERVAL '1 month')::date, 'YYYY-MM-DD') AS month_end,
-        to_char((NOW() AT TIME ZONE 'Asia/Kolkata'), 'FMMonth YYYY')                                                  AS month_label
+        to_char((NOW() AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM')      AS current_ym,
+        to_char((NOW() AT TIME ZONE 'Asia/Kolkata'), 'FMMonth YYYY') AS month_label
     `).get();
-    const { month_start: curMonthStart, month_end: curMonthEnd, month_label: curMonthLabel } = bounds;
+    const { current_ym: curYm, month_label: curMonthLabel } = bounds;
     const currentMonth = await db.prepare(`
       SELECT
         COALESCE(SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_amount ELSE 0 END), 0)                        AS received,
@@ -66,8 +64,8 @@ router.get('/income-report', async (req, res) => {
         CAST(COUNT(*) AS INTEGER)                                                                                      AS count
       FROM bills b
       LEFT JOIN patients p ON b.patient_id = p.id
-      WHERE b.bill_date::date >= ? AND b.bill_date::date < ? AND b.payment_status != 'voided'${branchWhere}
-    `).get(curMonthStart, curMonthEnd, ...branchParams);
+      WHERE SUBSTR(b.bill_date, 1, 7) = ? AND b.payment_status != 'voided'${branchWhere}
+    `).get(curYm, ...branchParams);
 
     // Summary scope: yearly = all-time, monthly/weekly = selected year
     const summaryPattern = period === 'yearly' ? '%' : `${yr}%`;
@@ -109,10 +107,10 @@ router.get('/income-report', async (req, res) => {
           CAST(COUNT(*) AS INTEGER) AS count
         FROM bills b
         LEFT JOIN patients p ON b.patient_id = p.id
-        WHERE b.bill_date::date >= ? AND b.bill_date::date < ? AND b.payment_status != 'voided'${branchWhere}
+        WHERE SUBSTR(b.bill_date, 1, 7) = ? AND b.payment_status != 'voided'${branchWhere}
         GROUP BY CAST(CEIL(EXTRACT(DAY FROM b.bill_date::date) / 7.0) AS INTEGER)
         ORDER BY period_key ASC
-      `).all(curMonthStart, curMonthEnd, ...branchParams);
+      `).all(curYm, ...branchParams);
     } else {
       trend = await db.prepare(`
         SELECT
@@ -164,22 +162,22 @@ router.get('/income-report', async (req, res) => {
 // stats must be declared before /:id to avoid matching 'stats'
 router.get('/stats/summary', async (req, res) => {
   try {
-    // Compute "today" and the current-month range entirely in Postgres (IST) so
-    // this can't drift from how bill_date values are compared/parsed there.
+    // "today" and "current month" computed in Postgres (IST) and matched against
+    // bill_date as plain text — SUBSTR(bill_date,1,7) = 'YYYY-MM' — the exact same
+    // comparison the income-report trend uses, so this can never disagree with it.
     const bounds = await db.prepare(`
       SELECT
-        to_char((NOW() AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD')                                            AS today,
-        to_char(date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata'))::date, 'YYYY-MM-DD')                        AS month_start,
-        to_char((date_trunc('month', (NOW() AT TIME ZONE 'Asia/Kolkata')) + INTERVAL '1 month')::date, 'YYYY-MM-DD') AS month_end
+        to_char((NOW() AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM-DD') AS today,
+        to_char((NOW() AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM')          AS current_ym
     `).get();
-    const { today, month_start, month_end } = bounds;
+    const { today, current_ym: curYm } = bounds;
 
     const todayRevenue = await db.prepare(
-      "SELECT COALESCE(SUM(total_amount),0) as total FROM bills WHERE bill_date::date = ? AND payment_status='paid'"
+      "SELECT COALESCE(SUM(total_amount),0) as total FROM bills WHERE bill_date = ? AND payment_status='paid'"
     ).get(today);
     const monthRevenue = await db.prepare(
-      "SELECT COALESCE(SUM(total_amount),0) as total FROM bills WHERE bill_date::date >= ? AND bill_date::date < ? AND payment_status='paid'"
-    ).get(month_start, month_end);
+      "SELECT COALESCE(SUM(total_amount),0) as total FROM bills WHERE SUBSTR(bill_date,1,7) = ? AND payment_status='paid'"
+    ).get(curYm);
     const pending = await db.prepare(
       "SELECT CAST(COUNT(*) AS INTEGER) as c, COALESCE(SUM(total_amount),0) as total FROM bills WHERE payment_status='pending' AND payment_status != 'voided'"
     ).get();
@@ -187,15 +185,15 @@ router.get('/stats/summary', async (req, res) => {
     const todayByBranch = await db.prepare(`
       SELECT COALESCE(p.clinic_branch, 'Avadi') AS branch, COALESCE(SUM(b.total_amount),0) AS total
       FROM bills b LEFT JOIN patients p ON b.patient_id = p.id
-      WHERE b.bill_date::date = ? AND b.payment_status = 'paid'
+      WHERE b.bill_date = ? AND b.payment_status = 'paid'
       GROUP BY COALESCE(p.clinic_branch, 'Avadi')
     `).all(today);
     const monthByBranch = await db.prepare(`
       SELECT COALESCE(p.clinic_branch, 'Avadi') AS branch, COALESCE(SUM(b.total_amount),0) AS total
       FROM bills b LEFT JOIN patients p ON b.patient_id = p.id
-      WHERE b.bill_date::date >= ? AND b.bill_date::date < ? AND b.payment_status = 'paid'
+      WHERE SUBSTR(b.bill_date,1,7) = ? AND b.payment_status = 'paid'
       GROUP BY COALESCE(p.clinic_branch, 'Avadi')
-    `).all(month_start, month_end);
+    `).all(curYm);
 
     const toBranchMap = (rows) => {
       const map = { Avadi: 0, Thiruninravur: 0 };
