@@ -284,6 +284,13 @@ async function seed(db) {
       'INSERT INTO users (name, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)'
     ).run('Admin', 'admin', hash, 'owner', 1);
     console.log('Default owner created  →  email: admin  password: admin');
+  } else if (process.env.RESET_ADMIN === 'true') {
+    // One-off recovery: set RESET_ADMIN=true, restart, then remove the variable.
+    const hash = await bcrypt.hash('admin', 10);
+    await db.prepare(
+      "UPDATE users SET password = ?, role = 'owner', is_active = 1 WHERE email = 'admin'"
+    ).run(hash);
+    console.log('Owner credentials reset  →  email: admin  password: admin');
   }
 
   const existingDoc = await db.prepare("SELECT id FROM doctors WHERE name = 'Dr. Vignesh'").get();
